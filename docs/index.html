@@ -258,7 +258,7 @@
       <h4>🖥️ Your machine</h4>
       <div class="chip hot">Agent harness (Claude Code, etc.)</div>
       <div class="chip hot">MCP servers &amp; scripts — <b>the only things that touch Snowflake</b></div>
-      <div class="chip">Credentials (SSH/RSA key)</div>
+      <div class="chip">Credentials (RSA key, via environment variable)</div>
       <div class="chip">Files on disk · DataFrames in memory</div>
     </div>
     <div class="zone snow">
@@ -330,7 +330,7 @@
     <li class="boundary"><span class="who harness">Harness</span> sends the conversation — plus the list of available tool definitions — to the <span class="who llm">LLM</span>. <b>🔴 With a remote provider, your question just left your machine.</b></li>
     <li><span class="who llm">LLM</span> reads the tool definitions, writes SQL, and replies not with prose but with a <b>tool-call request</b>: <code>run_query("SELECT region, COUNT(*), SUM(quantity*unit_price) FROM demo_orders GROUP BY region")</code> — remember, this is just JSON text.</li>
     <li><span class="who harness">Harness</span> shows you the call for approval, then forwards it to the MCP server — a separate child process on your machine — as a JSON-RPC message over stdio.</li>
-    <li><span class="who tool">MCP server</span> opens a TLS connection to Snowflake, authenticating with your <b>RSA key pair</b> (the private key never leaves your machine; the model never sees it — it lives in an environment variable path, not in the conversation).</li>
+    <li><span class="who tool">MCP server</span> opens a TLS connection to Snowflake, authenticating with your <b>RSA key pair</b> (the private key never leaves your machine; the model never sees it — the key contents live in an environment variable that only the tool process reads, never in the conversation).</li>
     <li><span class="who snow">Snowflake</span> compiles and executes the SQL <b>inside its own warehouse</b>. All 100,000 raw rows are scanned <i>there</i>. This is the heavy lifting, and it never leaves the database.</li>
     <li><span class="who snow">Snowflake</span> returns the result — just 4 aggregated rows — to the MCP server (as Arrow/JSON over the wire; the Python connector hands your code tuples).</li>
     <li><span class="who tool">MCP server</span> makes <b>the most consequential decision in this entire architecture</b>: it serializes <i>what it chooses to return</i> — here, the 4 rows as JSON — into the tool result and writes it to stdout.</li>
@@ -697,7 +697,7 @@
   <ul>
     <li>For each tool: <b>what exactly does it return to the model?</b> Rows, metadata, or a path? Is there a row cap?</li>
     <li>Does the agent's Snowflake <b>role</b> have read-only access, scoped to the right schemas?</li>
-    <li>Where do credentials live? (Answer should be: environment/key files on the runner — <b>never</b> in code or in the conversation.)</li>
+    <li>Where do credentials live? (Answer should be: environment variables or a gitignored <code>.env</code> on the runner — <b>never</b> in code or in the conversation.)</li>
     <li>Are we reviewing <b>QUERY_HISTORY</b> for agent-driven activity? (Snowflake logs every query these tools run — and the tools in this repo tag their connections with a <code>QUERY_TAG</code>, so filtering agent activity is a one-line WHERE clause.)</li>
     <li>Which patterns are approved for which data sensitivity tiers? (e.g., public data → A/D; internal → B/E/F; restricted → C or G.)</li>
     <li>If we're using a remote inference provider: what are its data-retention and training terms for API traffic?</li>
@@ -707,7 +707,7 @@
 <!-- ============================================================ -->
 <section id="footnotes">
   <p class="kicker">Appendix</p>
-  <h2>Two security footnotes</h2>
+  <h2>Three security footnotes</h2>
   <p>This guide is about data flow, so we've kept these brief — but anyone deploying these patterns
   should know they exist.</p>
   <div class="callout warn">
@@ -729,6 +729,19 @@
     Defense in depth, in one sentence: <i>the tool decides what comes back; the role decides what can
     happen at all.</i></p>
   </div>
+  <div class="callout amber">
+    <h4>3 · The key contents live in an environment variable — that's a trade-off</h4>
+    <p>These tools read the private key's <i>contents</i> from <code>$SNOWFLAKE_PRIVATE_KEY</code>
+    (set in your shell or a gitignored <code>.env</code>). That's convenient and keeps the key out of
+    code and out of the conversation — but anything that can read the process environment or the
+    <code>.env</code> file (an environment dump, or a coding agent with shell access running
+    <code>cat .env</code>) sees the key itself, not just a path. Sensible mitigations: keep
+    <code>.env</code> gitignored with tight permissions (<code>chmod 600</code>), encrypt the key with
+    a passphrase so the PEM alone isn't sufficient, give the key's user a <b>read-only role</b> so a
+    leak bounds at read access, and rotate keys cheaply (<code>ALTER USER … SET RSA_PUBLIC_KEY_2</code>
+    supports zero-downtime rotation). In production, prefer a secrets manager that injects the
+    variable at process start.</p>
+  </div>
 </section>
 
 <!-- ============================================================ -->
@@ -748,7 +761,9 @@ claude                            <span class="c"># approve the sqlite-* MCP ser
   <h3>❄️ Do it for real — Snowflake</h3>
   <pre><code><span class="c"># the whole quickstart, abridged:</span>
 openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes256 -inform PEM -out keys/rsa_key.p8
-<span class="c"># …register the public key with ALTER USER, set SNOWFLAKE_* env vars, then:</span>
+<span class="c"># …register the public key with ALTER USER, then put the key CONTENTS in .env:</span>
+printf <span class="s">'SNOWFLAKE_PRIVATE_KEY="%s"\n'</span> <span class="s">"$(cat keys/rsa_key.p8)"</span> &gt;&gt; .env
+<span class="c"># …fill in the other SNOWFLAKE_* variables (see .env.example), then:</span>
 uv run snowflake/scripts/query_to_console.py snowflake/sql/setup_demo_table.sql
 uv run snowflake/scripts/query_to_file.py snowflake/sql/select_star_caution.sql     <span class="c"># 🟢 100k rows → CSV</span>
 uv run snowflake/scripts/query_to_dataframe.py snowflake/sql/select_star_caution.sql <span class="c"># 🟢 100k rows → RAM</span>

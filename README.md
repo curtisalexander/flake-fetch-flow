@@ -91,7 +91,9 @@ openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes256 -inform PEM -out rsa_key.p
 openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
 ```
 
-The `keys/` directory is gitignored. Keep it that way.
+The `keys/` directory is gitignored. Keep it that way. (The `.p8` file is only
+scaffolding here — in step 3 you'll copy its *contents* into an environment
+variable, which is what the tools actually read.)
 
 ### 2. Register the public key with your Snowflake user
 
@@ -107,8 +109,22 @@ DESC USER my_user;  -- confirm RSA_PUBLIC_KEY_FP is set
 ### 3. Set environment variables
 
 ```bash
-cp .env.example .env   # then edit — or export the variables in your shell profile
+cp .env.example .env   # then edit — every Snowflake tool auto-loads this file
 ```
+
+The private key goes into `SNOWFLAKE_PRIVATE_KEY` as the key's **contents** (the full PEM text, `BEGIN`/`END` lines included) — not a path to the file. The fastest way to fill it in:
+
+```bash
+# Append the key to .env as a quoted multi-line value (newlines intact):
+printf 'SNOWFLAKE_PRIVATE_KEY="%s"\n' "$(cat keys/rsa_key.p8)" >> .env
+
+# ...or skip .env and export it straight from your shell (bash/zsh):
+export SNOWFLAKE_PRIVATE_KEY="$(cat keys/rsa_key.p8)"
+```
+
+Both a quoted multi-line value and a single-line value with literal `\n` separators are accepted. If you encrypted the key in step 1, also set `SNOWFLAKE_PRIVATE_KEY_PASSPHRASE`.
+
+Under the hood, each tool's `private_key_der()` function does the small dance Snowflake's Python connector requires: it parses the PEM text with the [`cryptography`](https://cryptography.io) library (decrypting it if a passphrase is set) and re-serializes it to the unencrypted DER/PKCS#8 bytes the connector's `private_key` parameter expects — PEM text can't be passed to the connector directly.
 
 All the Snowflake tools read the same `SNOWFLAKE_*` variables; credentials never appear in code, in `.mcp.json`, or (importantly) in the model's context.
 
@@ -166,4 +182,8 @@ The guide is published at [curtisalexander.github.io/flake-fetch-flow](https://c
 
 ## A note on safety
 
-These are *teaching* tools, kept intentionally small — note that none of them restricts SQL statement types (`run_query("DROP TABLE …")` is relayed as faithfully as a SELECT), so the **read-only role is the guardrail**, not the tool. Before pointing an agent at data you care about: use a read-only role and a dedicated warehouse, and keep keys out of the repo (the `.gitignore` helps). For auditing, every Snowflake tool here connects with `QUERY_TAG = 'flake-fetch-flow'`, so filtering agent activity out of `QUERY_HISTORY` is a one-line WHERE clause. See also the guide's [security footnotes](https://curtisalexander.github.io/flake-fetch-flow/#footnotes) (prompt injection, defense in depth) and [decision matrix](https://curtisalexander.github.io/flake-fetch-flow/#matrix), which maps data sensitivity to patterns.
+These are *teaching* tools, kept intentionally small — note that none of them restricts SQL statement types (`run_query("DROP TABLE …")` is relayed as faithfully as a SELECT), so the **read-only role is the guardrail**, not the tool. Before pointing an agent at data you care about: use a read-only role and a dedicated warehouse, and keep keys out of the repo (the `.gitignore` helps).
+
+Holding the private key's *contents* in an environment variable (or `.env`) is also a trade-off worth naming: anything that can read the process environment or the `.env` file — `ps eww`, a debugging tool that dumps `os.environ`, or a coding agent with shell access running `cat .env` — sees the key itself, not just a path to it. The mitigations are the ones you'd expect: `.env` stays gitignored and permission-tight (`chmod 600 .env`), the key is encrypted with a passphrase so the PEM alone isn't enough, the key's user has a read-only role so a leaked key bounds at "can read what the agent could already read," and rotation is cheap (`ALTER USER … SET RSA_PUBLIC_KEY_2` enables zero-downtime swaps). For production, a secrets manager that injects the variable at process start beats a file on disk.
+
+For auditing, every Snowflake tool here connects with `QUERY_TAG = 'flake-fetch-flow'`, so filtering agent activity out of `QUERY_HISTORY` is a one-line WHERE clause. See also the guide's [security footnotes](https://curtisalexander.github.io/flake-fetch-flow/#footnotes) (prompt injection, defense in depth, credential handling) and [decision matrix](https://curtisalexander.github.io/flake-fetch-flow/#matrix), which maps data sensitivity to patterns.
