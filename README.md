@@ -8,7 +8,7 @@ This is a learning repo. It exists to make one idea stick:
 
 Every tool here demonstrates a different answer to the question *"where do the result rows go?"* — into the model's context, onto disk, into a DataFrame, or nowhere near the LLM at all.
 
-📖 **Read the full illustrated guide:** [`docs/index.html`](docs/index.html) — written for both technical and non-technical audiences, with data-flow diagrams, worked examples, and a decision matrix. (Served via GitHub Pages once published.)
+📖 **Read the full illustrated guide:** [curtisalexander.github.io/flake-fetch-flow](https://curtisalexander.github.io/flake-fetch-flow/) — written for both technical and non-technical audiences, with data-flow diagrams, worked examples, and a decision matrix. (Source: [`docs/index.html`](docs/index.html))
 
 🧪 **Want to *see* it before wiring up Snowflake?** The [`sqlite/` playground](sqlite/README.md) has twin versions of every tool backed by a local SQLite file — zero accounts, zero credentials — plus a guided tour of copy-paste prompts that demonstrates each pattern live with your agent. The data flows are identical; only the database is humbler.
 
