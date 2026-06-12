@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "snowflake-in-context": {
+      "command": "uv",
+      "args": ["run", "snowflake/mcp-servers/mcp_results_in_context.py"]
+    },
+    "snowflake-to-file": {
+      "command": "uv",
+      "args": ["run", "snowflake/mcp-servers/mcp_results_to_file.py"]
+    },
+    "snowflake-metadata-only": {
+      "command": "uv",
+      "args": ["run", "snowflake/mcp-servers/mcp_metadata_only.py"]
+    },
+    "sqlite-in-context": {
+      "command": "uv",
+      "args": ["run", "sqlite/mcp-servers/mcp_results_in_context.py"]
+    },
+    "sqlite-to-file": {
+      "command": "uv",
+      "args": ["run", "sqlite/mcp-servers/mcp_results_to_file.py"]
+    },
+    "sqlite-metadata-only": {
+      "command": "uv",
+      "args": ["run", "sqlite/mcp-servers/mcp_metadata_only.py"]
+    }
+  }
+}

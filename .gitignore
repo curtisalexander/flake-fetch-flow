@@ -1,0 +1,19 @@
+# Secrets — never commit keys or credentials
+.env
+*.p8
+*.pem
+*.pub
+keys/
+
+# Query results & playground database
+results/*
+!results/.gitkeep
+sqlite/demo.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store

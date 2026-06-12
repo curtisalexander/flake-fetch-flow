@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>flake-fetch-flow — How data flows between a coding agent and Snowflake</title>
+<meta name="description" content="An illustrated guide, for technical and non-technical audiences, to how data really flows when a coding agent queries Snowflake — and how implementation choices change everything.">
+<style>
+  :root {
+    --ink: #11253c;
+    --ink-soft: #44586f;
+    --bg: #f4f8fc;
+    --card: #ffffff;
+    --line: #d8e4f0;
+    --ice: #29b5e8;
+    --ice-dark: #0e7fae;
+    --navy: #0b2a4a;
+    --ctx: #d6336c;        /* data enters model context */
+    --ctx-bg: #fdeef4;
+    --meta: #c77d0a;       /* metadata only */
+    --meta-bg: #fdf3e3;
+    --safe: #1f9d55;       /* data stays local */
+    --safe-bg: #e9f7ef;
+    --code-bg: #0d1f33;
+    --code-ink: #cfe3f5;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6; font-size: 16.5px;
+  }
+  nav {
+    position: sticky; top: 0; z-index: 10; background: rgba(11, 42, 74, 0.97);
+    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center;
+  }
+  nav a { color: #bfe2f5; text-decoration: none; font-size: 13.5px; font-weight: 600; letter-spacing: .02em; }
+  nav a:hover { color: #fff; }
+  header.hero {
+    background: linear-gradient(160deg, #0b2a4a 0%, #10446e 55%, #0e7fae 100%);
+    color: #fff; padding: 72px 24px 64px; text-align: center;
+  }
+  header.hero .flake { font-size: 44px; }
+  header.hero h1 { font-size: clamp(30px, 5vw, 46px); margin: 10px 0 14px; letter-spacing: -0.02em; }
+  header.hero h1 .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 700; }
+  header.hero p.sub { max-width: 720px; margin: 0 auto; font-size: clamp(16px, 2.2vw, 19px); color: #d4e9f7; }
+  header.hero p.sub b { color: #fff; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 20px 80px; }
+  section { margin-top: 56px; }
+  h2 {
+    font-size: clamp(24px, 3.4vw, 32px); letter-spacing: -0.02em; color: var(--navy);
+    border-bottom: 3px solid var(--ice); display: inline-block; padding-bottom: 4px; margin-bottom: 18px;
+  }
+  h3 { color: var(--navy); margin-top: 30px; }
+  .kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 800; color: var(--ice-dark); margin-bottom: -10px; }
+  p, li { color: var(--ink-soft); }
+  p b, li b, p strong, li strong { color: var(--ink); }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; background: #e6eef7; padding: 1px 5px; border-radius: 4px; color: var(--navy); }
+  pre {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  pre .c { color: #6f8db0; } pre .k { color: #7dd3fc; } pre .s { color: #a5e6b8; }
+
+  /* ---- callouts ---- */
+  .callout { border-radius: 10px; padding: 16px 20px; margin: 20px 0; border-left: 5px solid; }
+  .callout p:first-child { margin-top: 0; } .callout p:last-child { margin-bottom: 0; }
+  .callout.note { background: #e8f4fb; border-color: var(--ice); }
+  .callout.warn { background: var(--ctx-bg); border-color: var(--ctx); }
+  .callout.good { background: var(--safe-bg); border-color: var(--safe); }
+  .callout.amber { background: var(--meta-bg); border-color: var(--meta); }
+  .callout h4 { margin: 0 0 6px; color: var(--navy); }
+
+  /* ---- legend & badges ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+  .badge.ctx  { background: var(--ctx-bg);  color: var(--ctx);  border: 1.5px solid var(--ctx); }
+  .badge.meta { background: var(--meta-bg); color: var(--meta); border: 1.5px solid var(--meta); }
+  .badge.safe { background: var(--safe-bg); color: var(--safe); border: 1.5px solid var(--safe); }
+
+  /* ---- zone diagram ---- */
+  .zones { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 26px 0 8px; }
+  .zone { background: var(--card); border: 2px solid var(--line); border-radius: 14px; padding: 14px 14px 12px; }
+  .zone h4 { margin: 0 0 10px; font-size: 15px; color: var(--navy); }
+  .zone .chip { background: #eef4fb; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13.5px; margin: 6px 0; color: var(--ink); }
+  .zone .chip.hot { background: #dff1fb; border-color: var(--ice); font-weight: 600; }
+  .zone-note { font-size: 12.5px; color: var(--ink-soft); margin: 8px 0 0; font-style: italic; }
+  .zone.provider { border-color: #b9a7e6; } .zone.machine { border-color: var(--ice); } .zone.snow { border-color: #7cc8e8; }
+  .wires { background: var(--card); border: 2px dashed var(--line); border-radius: 14px; padding: 14px 18px; margin: 0 0 6px; }
+  .wires .wire { display: flex; align-items: baseline; gap: 10px; margin: 8px 0; font-size: 14.5px; }
+  .wires .ends { font-weight: 700; color: var(--navy); white-space: nowrap; }
+  .wires .what { color: var(--ink-soft); }
+  .nolink {
+    margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: var(--safe-bg);
+    border: 2px solid var(--safe); font-weight: 600; color: #14683a; text-align: center;
+  }
+
+  /* ---- pipeline flow diagrams ---- */
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; margin: 18px 0; }
+  .flow .node {
+    background: var(--card); border: 2px solid var(--ice-dark); border-radius: 10px;
+    padding: 8px 13px; font-size: 13.5px; font-weight: 600; color: var(--navy);
+    display: flex; flex-direction: column; justify-content: center; text-align: center; min-width: 92px;
+  }
+  .flow .node small { font-weight: 500; color: var(--ink-soft); font-size: 11.5px; }
+  .flow .node.endpoint { border-style: dashed; }
+  .flow .node.hot-ctx { border-color: var(--ctx); background: var(--ctx-bg); }
+  .flow .node.hot-safe { border-color: var(--safe); background: var(--safe-bg); }
+  .flow .node.hot-meta { border-color: var(--meta); background: var(--meta-bg); }
+  .flow .arr {
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    padding: 0 8px; font-size: 11px; color: var(--ink-soft); min-width: 64px; text-align: center;
+  }
+  .flow .arr::after { content: "⟶"; font-size: 20px; color: var(--ice-dark); line-height: 1; }
+  .flow .arr.ret::after { content: "⟵"; }
+  .flow .arr.ctx::after { color: var(--ctx); }
+  .flow .arr.safe::after { color: var(--safe); }
+  .flow .arr.meta::after { color: var(--meta); }
+  .flow .arr span { max-width: 110px; }
+
+  /* ---- sequence (numbered trace) ---- */
+  ol.seq { list-style: none; counter-reset: step; padding-left: 0; margin: 20px 0; }
+  ol.seq > li {
+    counter-increment: step; position: relative; padding: 10px 14px 10px 56px; margin: 8px 0;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; font-size: 15px;
+  }
+  ol.seq > li::before {
+    content: counter(step); position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px; border-radius: 50%; background: var(--navy); color: #fff;
+    font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center;
+  }
+  ol.seq > li.boundary { border-left: 5px solid var(--ctx); background: var(--ctx-bg); }
+  ol.seq > li.boundary-safe { border-left: 5px solid var(--safe); background: var(--safe-bg); }
+  .who {
+    display: inline-block; padding: 1px 9px; border-radius: 6px; font-size: 12px; font-weight: 700;
+    margin-right: 6px; vertical-align: 1px; white-space: nowrap;
+  }
+  .who.you     { background: #e3eefa; color: #1d4f8f; }
+  .who.llm     { background: #ece4fa; color: #5c39b8; }
+  .who.harness { background: #dff1fb; color: var(--ice-dark); }
+  .who.tool    { background: #e2f3e9; color: #18794e; }
+  .who.snow    { background: #e0f0f8; color: #0a6a96; }
+
+  /* ---- pattern cards ---- */
+  .pattern { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; margin: 22px 0; box-shadow: 0 1px 3px rgba(11,42,74,.06); }
+  .pattern .head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .pattern h3 { margin: 0; font-size: 19px; }
+  .pattern .file { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--ice-dark); margin-top: 4px; }
+  .pattern p.when { font-size: 14.5px; }
+  .pattern p.when b { color: var(--ink); }
+
+  /* ---- tables ---- */
+  table.data { border-collapse: collapse; width: 100%; margin: 14px 0; background: var(--card); font-size: 13.5px; border-radius: 10px; overflow: hidden; }
+  table.data caption { caption-side: top; text-align: left; font-size: 13px; font-weight: 700; color: var(--navy); padding: 6px 2px; }
+  table.data th { background: var(--navy); color: #fff; padding: 7px 12px; text-align: left; font-size: 12.5px; letter-spacing: .03em; }
+  table.data td { padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--ink); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+  table.data tr.ellipsis td { color: var(--ink-soft); font-style: italic; text-align: center; }
+  table.matrix { font-family: inherit; }
+  table.matrix td { font-family: inherit; font-size: 13.5px; vertical-align: top; }
+  table.matrix td:first-child { font-weight: 600; white-space: nowrap; }
+  .tbl-note { font-size: 13px; color: var(--ink-soft); font-style: italic; margin-top: -6px; }
+
+  /* ---- analogy boxes ---- */
+  .analogies { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+  .analogy { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; }
+  .analogy .tag { font-size: 11.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ice-dark); }
+  .analogy h4 { margin: 6px 0 8px; color: var(--navy); font-size: 17px; }
+  .analogy p { font-size: 14.5px; margin: 8px 0 0; }
+
+  .big-idea {
+    background: linear-gradient(150deg, #0b2a4a, #11507c); color: #e8f4fb; border-radius: 16px;
+    padding: 28px 30px; margin: 26px 0; font-size: clamp(17px, 2.4vw, 21px); line-height: 1.55;
+  }
+  .big-idea b { color: #7fd6f7; }
+
+  footer { background: var(--navy); color: #9fc4dd; text-align: center; padding: 30px 20px; font-size: 14px; }
+  footer a { color: #7fd6f7; }
+
+  @media (max-width: 760px) {
+    .zones, .analogies { grid-template-columns: 1fr; }
+    .flow { flex-direction: column; align-items: stretch; }
+    .flow .arr { transform: rotate(90deg); min-height: 44px; }
+    .flow .arr span { transform: rotate(-90deg) translateX(0); display:none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="#tldr">TL;DR</a>
+  <a href="#cast">The Map</a>
+  <a href="#indirection">Indirection</a>
+  <a href="#trace">The Full Trace</a>
+  <a href="#patterns">Six Patterns</a>
+  <a href="#example">Worked Example</a>
+  <a href="#matrix">Decision Matrix</a>
+  <a href="#local">Local LLMs</a>
+  <a href="#rightsize">Right-sizing</a>
+  <a href="#leaders">For Leaders</a>
+  <a href="#repo">Try It</a>
+</nav>
+
+<header class="hero">
+  <div class="flake">❄️</div>
+  <h1><span class="mono">flake-fetch-flow</span></h1>
+  <p class="sub">How data <i>really</i> flows when a coding agent queries Snowflake — and why
+  <b>the way you implement the connection decides exactly which data the AI ever sees.</b></p>
+</header>
+
+<main>
+
+<!-- ============================================================ -->
+<section id="tldr">
+  <p class="kicker">For everyone</p>
+  <h2>TL;DR</h2>
+  <div class="big-idea">
+    The AI model is <b>never connected to Snowflake</b>. It can only <i>ask</i> for a tool to be run.
+    A small program on your machine — one that <b>you wrote and control</b> — holds the credentials,
+    sends the SQL, and lets Snowflake do the heavy processing. The model sees exactly one thing:
+    <b>whatever that program chooses to hand back.</b> Change a few lines in that program, and you change
+    whether raw data flows into the AI — or never gets anywhere near it.
+  </div>
+  <p>This guide traces every hop of that journey, shows six concrete implementations side by side
+  (three <a href="https://modelcontextprotocol.io">MCP servers</a>, three plain Python scripts — all in
+  <a href="https://github.com/">this repo</a>), and gives both engineers and leaders a shared vocabulary
+  for the question that actually matters: <b>“where do the result rows go?”</b></p>
+  <div class="legend">
+    <span class="badge ctx">🔴 rows enter the model's context</span>
+    <span class="badge meta">🟠 only metadata reaches the model</span>
+    <span class="badge safe">🟢 data stays local — never near the model</span>
+  </div>
+  <p class="tbl-note">This color code is used consistently in every diagram below.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="cast">
+  <p class="kicker">For everyone</p>
+  <h2>The map: three places, two wires</h2>
+  <p>Everything in this story happens across three locations. Keep this picture in mind — every
+  pattern in this guide is just a different route across it.</p>
+
+  <div class="zones">
+    <div class="zone provider">
+      <h4>☁️ Inference provider</h4>
+      <div class="chip hot">The LLM (the “brain”)</div>
+      <div class="chip">Receives the conversation, returns text &amp; tool-call requests</div>
+      <p class="zone-note">Usually a remote API. Can also run on your own hardware — see <a href="#local">Local LLMs</a>.</p>
+    </div>
+    <div class="zone machine">
+      <h4>🖥️ Your machine</h4>
+      <div class="chip hot">Agent harness (Claude Code, etc.)</div>
+      <div class="chip hot">MCP servers &amp; scripts — <b>the only things that touch Snowflake</b></div>
+      <div class="chip">Credentials (SSH/RSA key)</div>
+      <div class="chip">Files on disk · DataFrames in memory</div>
+    </div>
+    <div class="zone snow">
+      <h4>❄️ Snowflake</h4>
+      <div class="chip hot">Your data — millions of raw rows</div>
+      <div class="chip hot">Compute — where SQL actually executes</div>
+      <div class="chip">Access control, query history (audit log)</div>
+    </div>
+  </div>
+
+  <div class="wires">
+    <div class="wire"><span class="ends">Your machine ⇄ Inference provider:</span>
+      <span class="what">the <b>entire conversation context</b> — your messages, the agent's replies, and every tool result — is sent on <b>every request</b>. This wire is why “what enters the context” matters so much.</span></div>
+    <div class="wire"><span class="ends">Your machine ⇄ Snowflake:</span>
+      <span class="what"><b>SQL goes up, result rows come down</b>, over TLS, authenticated with your RSA key pair. Opened only by your MCP server or script — never by the model.</span></div>
+    <div class="nolink">✅ There is <u>no wire</u> between the inference provider and Snowflake. None. The LLM cannot reach your database — it can only ask your tools to act, and your tools decide what comes back.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="indirection">
+  <p class="kicker">The core concept</p>
+  <h2>Indirection: the agent holds a ticket, not the data</h2>
+  <p>When people hear “the AI is connected to our database,” they picture a pipe between the model and
+  Snowflake. That pipe does not exist. What the model holds is a <b>reference</b> — a name and a
+  description of a tool it may <i>request</i>. Acting on that request is somebody else's job.</p>
+
+  <div class="analogies">
+    <div class="analogy">
+      <div class="tag">For non-technical readers</div>
+      <h4>📚 The closed-stacks library</h4>
+      <p>In a research library, patrons never walk into the stacks. You fill out a <b>call slip</b>; a librarian
+      disappears into the archive, finds the material, and brings back <i>just what you asked for</i> —
+      a photocopied page, not the whole archive.</p>
+      <p>The LLM is the patron. The MCP server or script is the librarian. Snowflake is the closed stacks.
+      The patron never gets a key to the archive — and a good librarian (a well-written tool) decides
+      whether to bring back the page, a summary, or just “your document exists, it's 600 pages.”</p>
+    </div>
+    <div class="analogy">
+      <div class="tag">For engineers</div>
+      <h4>🔗 A pointer, not the value</h4>
+      <p>In C, <code>int *p</code> holds an <i>address</i>, not an integer. The value only materializes when
+      something dereferences it. The model's tool definitions are pointers: <code>run_query(sql)</code> is an
+      address into capability-space. The model can name it and pass arguments — that's all.</p>
+      <p>The <b>dereference happens in your process</b>: the harness routes the call, your server executes it,
+      and the return value you serialize is what gets written back. The model never touches the memory behind
+      the pointer — your code copies out exactly the bytes it chooses.</p>
+    </div>
+  </div>
+
+  <div class="callout note">
+    <h4>What a “tool call” physically is</h4>
+    <p>The model emits a blob of JSON: <code>{"name": "run_query", "arguments": {"sql": "SELECT …"}}</code>.
+    That's it — text. It is not a network connection, not a driver, not a session. The agent harness reads
+    that JSON, (typically asks your permission,) and forwards it to the tool process. The model's only
+    “power” is persuading your tooling to act — and your tooling defines what acting means.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="trace">
+  <p class="kicker">Step by step</p>
+  <h2>The full trace: “what was revenue by region?”</h2>
+  <p>Here is every hop for the most common setup — an MCP server whose tool returns query results
+  (<b>Pattern A</b> below). You type one question; eleven things happen.</p>
+
+  <ol class="seq">
+    <li><span class="who you">You</span> type into the coding agent: <i>“What was revenue by region in demo_orders?”</i></li>
+    <li class="boundary"><span class="who harness">Harness</span> sends the conversation — plus the list of available tool definitions — to the <span class="who llm">LLM</span>. <b>🔴 With a remote provider, your question just left your machine.</b></li>
+    <li><span class="who llm">LLM</span> reads the tool definitions, writes SQL, and replies not with prose but with a <b>tool-call request</b>: <code>run_query("SELECT region, COUNT(*), SUM(quantity*unit_price) FROM demo_orders GROUP BY region")</code> — remember, this is just JSON text.</li>
+    <li><span class="who harness">Harness</span> shows you the call for approval, then forwards it to the MCP server — a separate child process on your machine — as a JSON-RPC message over stdio.</li>
+    <li><span class="who tool">MCP server</span> opens a TLS connection to Snowflake, authenticating with your <b>RSA key pair</b> (the private key never leaves your machine; the model never sees it — it lives in an environment variable path, not in the conversation).</li>
+    <li><span class="who snow">Snowflake</span> compiles and executes the SQL <b>inside its own warehouse</b>. All 100,000 raw rows are scanned <i>there</i>. This is the heavy lifting, and it never leaves the database.</li>
+    <li><span class="who snow">Snowflake</span> returns the result — just 4 aggregated rows — to the MCP server (as Arrow/JSON over the wire; the Python connector hands your code tuples).</li>
+    <li><span class="who tool">MCP server</span> makes <b>the most consequential decision in this entire architecture</b>: it serializes <i>what it chooses to return</i> — here, the 4 rows as JSON — into the tool result and writes it to stdout.</li>
+    <li class="boundary"><span class="who harness">Harness</span> appends that tool result to the conversation. <b>🔴 Those 4 rows are now part of the model's context — permanently, for the rest of this conversation.</b></li>
+    <li class="boundary"><span class="who harness">Harness</span> sends the <i>entire updated conversation</i> back to the <span class="who llm">LLM</span>, which reads the tool result and writes its answer. <b>🔴 With a remote provider, the rows now travel on every subsequent request too.</b></li>
+    <li><span class="who you">You</span> read: <i>“West led with $6.5M in revenue across 25,012 orders, followed closely by East…”</i></li>
+  </ol>
+
+  <div class="callout amber">
+    <h4>The two boundaries worth memorizing</h4>
+    <p><b>Step 8 is the faucet</b> — the line of code where your tool decides what to return. Everything
+    downstream is plumbing. <b>Steps 2/9/10 are the context boundary</b> — whatever crosses into the
+    conversation is sent to the inference provider on every turn thereafter. Control the faucet and
+    you control the boundary.</p>
+  </div>
+
+  <h3>The same trace for a one-off script</h3>
+  <p>Now suppose there is no MCP server — you ask the agent to run a Python script that prints query
+  results (<b>Pattern D</b>). The flow is nearly identical; only the middleman changes:</p>
+  <ol class="seq">
+    <li><span class="who llm">LLM</span> requests a <b>shell tool</b> call: <code>uv run snowflake/scripts/query_to_console.py snowflake/sql/revenue_by_region.sql</code></li>
+    <li><span class="who harness">Harness</span> runs the script as a child process and <b>captures its stdout</b>.</li>
+    <li><span class="who tool">Script</span> connects to Snowflake, executes the SQL, and <b>prints</b> the rows.</li>
+    <li class="boundary"><span class="who harness">Harness</span> feeds the captured stdout back as the tool result. <b>🔴 Whatever the script printed is now in the model's context.</b></li>
+  </ol>
+  <p><b>The punchline:</b> MCP server vs. script is an <i>ergonomics</i> choice (typed tools, discoverability,
+  reuse across agents vs. a quick file). The <i>data-flow</i> choice is the same in both worlds:
+  <b>what does the tool return / print?</b> A script that prints rows is Pattern A in a trench coat.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="patterns">
+  <p class="kicker">Implementation choices = data-flow choices</p>
+  <h2>Six patterns, six different data flows</h2>
+  <p>All six are implemented in this repo as single, self-contained Python files — twice. The
+  <b><code>snowflake/</code></b> directory holds the real thing (the heart of the repo); the
+  <b><code>sqlite/</code></b> directory holds zero-setup twins backed by a local database, with a
+  guided tour of copy-paste prompts (<code>sqlite/README.md</code>) so you can watch each flow happen
+  live with your own agent before touching a warehouse. Same credentials, same SQL — radically different answers
+  to “what does the AI see?”</p>
+
+  <!-- Pattern A -->
+  <div class="pattern">
+    <div class="head"><h3>A · MCP tool returns the rows</h3> <span class="badge ctx">🔴 rows enter context</span></div>
+    <div class="file">snowflake/mcp-servers/mcp_results_in_context.py · try it: sqlite/mcp-servers/mcp_results_in_context.py</div>
+    <div class="flow">
+      <div class="node">LLM<small>tool call (JSON)</small></div>
+      <div class="arr"><span>stdio</span></div>
+      <div class="node">MCP server</div>
+      <div class="arr"><span>SQL / TLS</span></div>
+      <div class="node">Snowflake<small>processes 100k rows</small></div>
+      <div class="arr ret"><span>result rows</span></div>
+      <div class="node">MCP server</div>
+      <div class="arr ctx"><span>rows as JSON</span></div>
+      <div class="node hot-ctx">model context</div>
+    </div>
+    <pre><code><span class="k">@mcp.tool</span>
+<span class="k">def</span> run_query(sql: str, max_rows: int = 50) -&gt; str:
+    <span class="s">"""Run SQL and return the result rows directly."""</span>
+    ...
+    cur.execute(sql)
+    rows = cur.fetchmany(max_rows)          <span class="c"># clamped to a hard cap of 200</span>
+    <span class="k">return</span> json.dumps({<span class="s">"columns"</span>: columns, <span class="s">"rows"</span>: rows})  <span class="c"># ← THE FAUCET</span></code></pre>
+    <p class="when"><b>Choose when:</b> results are small and the model should reason about them directly —
+    aggregates, lookups, samples. The row cap is the guard rail; well-written SQL (GROUP BY, WHERE, LIMIT)
+    is the real control.</p>
+  </div>
+
+  <!-- Pattern B -->
+  <div class="pattern">
+    <div class="head"><h3>B · MCP tool writes a file, returns metadata</h3> <span class="badge safe">🟢 data to disk</span> <span class="badge meta">🟠 metadata to context</span></div>
+    <div class="file">snowflake/mcp-servers/mcp_results_to_file.py · try it: sqlite/mcp-servers/mcp_results_to_file.py</div>
+    <div class="flow">
+      <div class="node">LLM<small>tool call</small></div>
+      <div class="arr"><span>stdio</span></div>
+      <div class="node">MCP server</div>
+      <div class="arr"><span>SQL / TLS</span></div>
+      <div class="node">Snowflake</div>
+      <div class="arr ret"><span>rows (streamed)</span></div>
+      <div class="node hot-safe">results/*.csv<small>on disk 🟢</small></div>
+    </div>
+    <div class="flow">
+      <div class="node">MCP server</div>
+      <div class="arr meta"><span>path + row count + columns</span></div>
+      <div class="node hot-meta">model context</div>
+    </div>
+    <pre><code>    <span class="k">with</span> open(out_path, <span class="s">"w"</span>) <span class="k">as</span> f:          <span class="c"># rows short-circuit to disk…</span>
+        writer.writerows(cur.fetchmany(10_000))
+    <span class="k">return</span> json.dumps({<span class="s">"file"</span>: str(out_path),   <span class="c"># …only THIS returns</span>
+                       <span class="s">"rows_written"</span>: n, <span class="s">"columns"</span>: columns})</code></pre>
+    <p class="when"><b>Choose when:</b> result sets are large, or you want a durable artifact (Excel, pandas,
+    BI tools) without the data transiting the model. The agent stays useful — it knows the file's location
+    and shape and can orchestrate the next step.</p>
+  </div>
+
+  <!-- Pattern C -->
+  <div class="pattern">
+    <div class="head"><h3>C · MCP tool returns metadata only</h3> <span class="badge safe">🟢 no values, ever — by construction</span></div>
+    <div class="file">snowflake/mcp-servers/mcp_metadata_only.py · try it: sqlite/mcp-servers/mcp_metadata_only.py</div>
+    <div class="flow">
+      <div class="node">LLM</div>
+      <div class="arr"><span>stdio</span></div>
+      <div class="node">MCP server</div>
+      <div class="arr"><span>SQL / TLS</span></div>
+      <div class="node">Snowflake</div>
+      <div class="arr ret"><span>rows (counted, discarded)</span></div>
+      <div class="node">MCP server</div>
+      <div class="arr meta"><span>shape + timing only</span></div>
+      <div class="node hot-meta">model context</div>
+    </div>
+    <pre><code>    row_count = 0
+    <span class="k">while</span> batch := cur.fetchmany(10_000):
+        row_count += len(batch)                 <span class="c"># counted, never returned</span>
+    <span class="k">return</span> json.dumps({<span class="s">"row_count"</span>: row_count, <span class="s">"columns"</span>: column_names_and_types})</code></pre>
+    <p class="when"><b>Choose when:</b> the agent's job is to <i>write and validate</i> SQL against sensitive
+    data — it can iterate on queries, check shapes and counts, and a cell value physically cannot flow
+    through this tool. The strictest pattern.</p>
+  </div>
+
+  <!-- Pattern D -->
+  <div class="pattern">
+    <div class="head"><h3>D · Script prints rows; the agent runs it</h3> <span class="badge ctx">🔴 stdout <i>is</i> context</span></div>
+    <div class="file">snowflake/scripts/query_to_console.py · try it: sqlite/scripts/query_to_console.py</div>
+    <div class="flow">
+      <div class="node">LLM<small>shell tool call</small></div>
+      <div class="arr"><span>runs command</span></div>
+      <div class="node">script</div>
+      <div class="arr"><span>SQL / TLS</span></div>
+      <div class="node">Snowflake</div>
+      <div class="arr ret"><span>rows</span></div>
+      <div class="node">script<small>print()</small></div>
+      <div class="arr ctx"><span>captured stdout</span></div>
+      <div class="node hot-ctx">model context</div>
+    </div>
+    <p class="when"><b>The sleeper pattern.</b> No MCP anywhere, yet the data flow is identical to Pattern A —
+    <i>without</i> the row cap. Anything a tool prints, the model reads. If your team's “quick query script”
+    dumps 100k rows to stdout and someone asks an agent to run it, you've built a raw-data firehose into the
+    context by accident. <b>Run by a human in a terminal instead, it's 🟢 — the LLM is not in the loop at all.</b>
+    Same script, two flows; the difference is who's reading stdout.</p>
+  </div>
+
+  <!-- Pattern E -->
+  <div class="pattern">
+    <div class="head"><h3>E · Script streams rows to a CSV</h3> <span class="badge safe">🟢 data to disk</span> <span class="badge meta">🟠 one metadata line</span></div>
+    <div class="file">snowflake/scripts/query_to_file.py · try it: sqlite/scripts/query_to_file.py</div>
+    <div class="flow">
+      <div class="node">script</div>
+      <div class="arr"><span>SQL / TLS</span></div>
+      <div class="node">Snowflake</div>
+      <div class="arr ret"><span>rows, batched</span></div>
+      <div class="node hot-safe">results/*.csv 🟢</div>
+      <div class="arr meta"><span>"wrote 100000 rows…"</span></div>
+      <div class="node hot-meta">stdout → context</div>
+    </div>
+    <p class="when"><b>Choose when:</b> Pattern B's flow, script-style. Even with an agent driving, the model
+    only ever reads the one-line summary. Result size is irrelevant — rows stream through in batches.</p>
+  </div>
+
+  <!-- Pattern F -->
+  <div class="pattern">
+    <div class="head"><h3>F · Script loads a DataFrame (and doesn't dump it)</h3> <span class="badge safe">🟢 data in process memory</span></div>
+    <div class="file">snowflake/scripts/query_to_dataframe.py · try it: sqlite/scripts/query_to_dataframe.py</div>
+    <div class="flow">
+      <div class="node">script</div>
+      <div class="arr"><span>SQL / TLS</span></div>
+      <div class="node">Snowflake</div>
+      <div class="arr ret"><span>Arrow batches</span></div>
+      <div class="node hot-safe">pandas DataFrame<small>in RAM 🟢</small></div>
+      <div class="arr meta"><span>shape + dtypes only</span></div>
+      <div class="node hot-meta">stdout → context</div>
+    </div>
+    <pre><code>    df = cur.fetch_pandas_all()              <span class="c"># 100k rows → RAM, via Arrow</span>
+    print(f<span class="s">"DataFrame in memory: {df.shape[0]} rows x {df.shape[1]} columns"</span>)
+    <span class="c"># analysis happens HERE — aggregate, plot, model, export.</span>
+    <span class="c"># `--peek 5` would print 5 rows: one flag flips the data flow. 🔴</span></code></pre>
+    <p class="when"><b>Choose when:</b> the real work is computational — statistics, charts, ML — and belongs
+    in pandas, not in a language model. The data lives and dies inside the process. The <code>--peek</code>
+    flag exists in the repo precisely to demonstrate how small the gap between 🟢 and 🔴 is: one
+    <code>print(df.head())</code>.</p>
+  </div>
+
+  <div class="callout warn">
+    <h4>Honesty box: “stays out of context” is a default, not a padlock</h4>
+    <p>In patterns B, E, and F the rows land on disk — but a coding agent with shell access could still
+    <code>head results.csv</code>, and then those rows <i>are</i> in context. The file boundary means data
+    enters the conversation only through a <b>separate, visible, permission-gated action</b> — not as an
+    invisible side effect. For a hard guarantee, use Pattern C (no values by construction), restrict the
+    agent's read permissions, or keep the human in the loop (Pattern G: you run the script; the model is
+    never in the room). And remember the audit trail you already own: every query any of these tools runs
+    is in Snowflake's <code>QUERY_HISTORY</code>.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="example">
+  <p class="kicker">Seeing it with real(istic) data</p>
+  <h2>Worked example: 100,000 rows in, 4 rows out</h2>
+  <p>The repo's demo table holds 100,000 synthetic orders. Here's what lives in Snowflake — and never leaves:</p>
+
+  <table class="data">
+    <caption>❄️ In Snowflake: <code>demo_orders</code> — 100,000 rows × 6 columns (≈ 3 million tokens if you tried to show a model all of it)</caption>
+    <thead><tr><th>ORDER_ID</th><th>ORDER_TS</th><th>REGION</th><th>PRODUCT</th><th>QUANTITY</th><th>UNIT_PRICE</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td>2026-06-12 09:14:02</td><td>North</td><td>Anvil</td><td>3</td><td>187.50</td></tr>
+      <tr><td>1</td><td>2026-06-12 09:13:02</td><td>South</td><td>Rocket Skates</td><td>1</td><td>442.10</td></tr>
+      <tr><td>2</td><td>2026-06-12 09:12:02</td><td>East</td><td>Tornado Seeds</td><td>7</td><td>23.75</td></tr>
+      <tr><td>3</td><td>2026-06-12 09:11:02</td><td>West</td><td>Earthquake Pills</td><td>2</td><td>310.99</td></tr>
+      <tr><td>4</td><td>2026-06-12 09:10:02</td><td>North</td><td>Giant Magnet</td><td>5</td><td>99.00</td></tr>
+      <tr><td>5</td><td>2026-06-12 09:09:02</td><td>South</td><td>Anvil</td><td>9</td><td>64.25</td></tr>
+      <tr><td>6</td><td>2026-06-12 09:08:02</td><td>East</td><td>Rocket Skates</td><td>4</td><td>251.40</td></tr>
+      <tr><td>7</td><td>2026-06-12 09:07:02</td><td>West</td><td>Tornado Seeds</td><td>6</td><td>12.80</td></tr>
+      <tr class="ellipsis"><td colspan="6">… 99,992 more rows that stay exactly where they are …</td></tr>
+    </tbody>
+  </table>
+
+  <p>The tool sends this SQL up the wire — <b>pushing the computation to Snowflake</b>, which is what a
+  data warehouse is built for:</p>
+
+  <pre><code><span class="k">SELECT</span> region,
+       <span class="k">COUNT</span>(*)                          <span class="k">AS</span> orders,
+       <span class="k">ROUND</span>(<span class="k">SUM</span>(quantity * unit_price)) <span class="k">AS</span> revenue
+<span class="k">FROM</span> demo_orders
+<span class="k">GROUP BY</span> region
+<span class="k">ORDER BY</span> revenue <span class="k">DESC</span>;</code></pre>
+
+  <p>And this — the <i>entire</i> payload — is what comes back down and (in Pattern A) enters the model's context:</p>
+
+  <table class="data">
+    <caption>🔴 Into the model's context: 4 rows × 3 columns (≈ 60 tokens)</caption>
+    <thead><tr><th>REGION</th><th>ORDERS</th><th>REVENUE</th></tr></thead>
+    <tbody>
+      <tr><td>West</td><td>25,012</td><td>6,512,940</td></tr>
+      <tr><td>East</td><td>25,140</td><td>6,488,210</td></tr>
+      <tr><td>North</td><td>24,980</td><td>6,402,775</td></tr>
+      <tr><td>South</td><td>24,868</td><td>6,377,034</td></tr>
+    </tbody>
+  </table>
+
+  <p><b>3,000,000 tokens of raw data reduced to 60 tokens of answer-shaped data</b> — a 50,000× reduction —
+  because the filtering and aggregation happened in the database. The model receives exactly what it needs
+  to reason and explain, and nothing it doesn't. This is the ideal shape of agent–warehouse collaboration:
+  <b>Snowflake computes, the model interprets.</b></p>
+</section>
+
+<!-- ============================================================ -->
+<section id="matrix">
+  <p class="kicker">Choosing deliberately</p>
+  <h2>Decision matrix</h2>
+  <p>Same database, same credentials, same question — seven routes for the answer. Pick per use case;
+  you can run several patterns side by side (this repo registers A, B, and C simultaneously).</p>
+
+  <table class="data matrix">
+    <thead><tr><th>Route</th><th>Raw rows reach the model?</th><th>What the model sees</th><th>Best for</th></tr></thead>
+    <tbody>
+      <tr><td>A · MCP → rows in context</td><td><span class="badge ctx">🔴 yes (capped)</span></td><td>Up to N rows as JSON</td><td>Aggregates, lookups, small samples the model should reason about</td></tr>
+      <tr><td>B · MCP → CSV file</td><td><span class="badge safe">🟢 no*</span></td><td>File path, row count, columns</td><td>Big exports; artifacts for Excel/BI/pandas</td></tr>
+      <tr><td>C · MCP → metadata only</td><td><span class="badge safe">🟢 never</span></td><td>Row count, schema, timing</td><td>SQL authoring &amp; validation against sensitive data</td></tr>
+      <tr><td>D · script prints; agent runs it</td><td><span class="badge ctx">🔴 yes (uncapped!)</span></td><td>Everything printed</td><td>Honestly? Mostly accidents. Cap rows if you keep it.</td></tr>
+      <tr><td>E · script → CSV; agent runs it</td><td><span class="badge safe">🟢 no*</span></td><td>One metadata line</td><td>Pipelines; reproducible exports</td></tr>
+      <tr><td>F · script → DataFrame</td><td><span class="badge safe">🟢 no*</span></td><td>Shape + schema</td><td>Analysis that belongs in pandas, not in a model</td></tr>
+      <tr><td>G · you run any script yourself</td><td><span class="badge safe">🟢 LLM not in the loop</span></td><td>Nothing at all</td><td>Maximum sensitivity; the agent wrote the code, you run it</td></tr>
+    </tbody>
+  </table>
+  <p class="tbl-note">* “No” by default — see the honesty box above: an agent could still read the file as a separate, visible action.</p>
+
+  <div class="callout note">
+    <h4>The two-axis takeaway</h4>
+    <p><b>Axis 1 — mechanism:</b> MCP server vs. plain script. This changes ergonomics: typed tools,
+    discoverability, reuse across agents, permission prompts. <b>Axis 2 — destination:</b> context vs. file
+    vs. memory vs. metadata. <i>This</i> changes governance. Leaders tend to ask about axis 1
+    (“are we using MCP?”) when the question that determines data exposure is always axis 2
+    (“what does the tool return?”).</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="local">
+  <p class="kicker">The special case</p>
+  <h2>Local LLMs: when the “brain” never leaves the building</h2>
+  <p>Everything above assumed the inference provider is a remote API — that's what makes the context
+  boundary a <i>data-leaves-the-premises</i> boundary. But the model can also run on your own hardware
+  (llama.cpp, Ollama, vLLM, an on-prem cluster). Then the map collapses:</p>
+
+  <div class="zones">
+    <div class="zone machine" style="grid-column: span 2;">
+      <h4>🖥️ Your machine / your network — everything in one place</h4>
+      <div class="chip hot">The LLM (local weights)</div>
+      <div class="chip hot">Agent harness</div>
+      <div class="chip hot">MCP servers &amp; scripts</div>
+      <div class="chip">Files, DataFrames, credentials</div>
+      <p class="zone-note">The “context boundary” still exists — but now it's a line between two processes on hardware you own.</p>
+    </div>
+    <div class="zone snow">
+      <h4>❄️ Snowflake</h4>
+      <div class="chip hot">Data + compute (unchanged)</div>
+    </div>
+  </div>
+
+  <p>With local inference, <b>the third-party-exposure concern is moot</b>: rows entering the model's
+  context never reach any outside provider, because there is no outside provider. Every pattern on this
+  page — even firehose Pattern D — becomes a purely <i>internal</i> data movement (your machine ⇄ Snowflake,
+  which is traffic you already have today with any BI tool).</p>
+  <div class="callout good">
+    <h4>What local inference solves — and what it doesn't</h4>
+    <p><b>Solved:</b> “raw data must not flow to an external AI provider.” Gone, structurally.<br>
+    <b>Not solved:</b> the <i>capability</i> problem. A model drowning in 100,000 rows of context performs
+    just as badly on your hardware as on anyone else's (next section) — and access control still matters:
+    the tool's read-only role, not the model's location, is what stops a bad <code>DROP TABLE</code>.
+    Local inference changes <i>who can see</i> the context. It doesn't change <i>what belongs</i> in it.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="rightsize">
+  <p class="kicker">Capability, not just privacy</p>
+  <h2>Right-sizing: why firehosing a model backfires</h2>
+  <p>Suppose privacy were no concern at all. Dumping raw data into an LLM is <i>still</i> the wrong move,
+  for mechanical reasons:</p>
+  <ul>
+    <li><b>It often doesn't fit.</b> 100,000 rows × 6 columns ≈ 3 million tokens. Context windows are
+    measured in the hundreds of thousands. The request simply fails — or gets silently truncated.</li>
+    <li><b>When it fits, attention degrades.</b> Models reason worst over facts buried in the middle of
+    enormous contexts (the well-documented “lost in the middle” effect). Asking an LLM to sum a column
+    across 50,000 in-context rows trades a millisecond of warehouse compute for an unreliable,
+    slow, token-expensive approximation. <b>LLMs are not good calculators; databases are not good writers. Don't swap their jobs.</b></li>
+    <li><b>You pay for every token, every turn.</b> Context is resent with each request — a one-time
+    50,000-row paste becomes a recurring tax on the whole conversation.</li>
+  </ul>
+  <p>What models <i>are</i> excellent with: <b>small, answer-shaped data.</b> A 4-row aggregate, a
+  20-row top-N, a filtered sample with three relevant columns — the model can interpret, compare,
+  explain, and decide next steps flawlessly at that scale.</p>
+  <div class="callout good">
+    <h4>The rule of thumb</h4>
+    <p><b>Push computation down, pull conclusions up.</b> Use SQL's <code>WHERE</code>, <code>GROUP BY</code>,
+    and <code>LIMIT</code> to make Snowflake do what it's built for, and hand the model tens-to-hundreds of
+    rows, not thousands. If a result wouldn't fit comfortably on two screens, it probably belongs in a file
+    (Pattern B/E) or a DataFrame (Pattern F) — with the model orchestrating, not ingesting.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="leaders">
+  <p class="kicker">Plain-language summary</p>
+  <h2>For leaders: five sentences and a checklist</h2>
+  <ol>
+    <li>The AI model is <b>never connected to the database</b> — it fills out request slips; small programs
+    we write and control do the fetching (see <a href="#indirection">the library analogy</a>).</li>
+    <li>The single design decision that governs exposure is <b>what those programs hand back</b>: full rows,
+    a file location, or just counts and shapes.</li>
+    <li>Whatever does enter the conversation is sent to the AI provider <b>on every subsequent turn</b> —
+    so the discipline is applied at the moment of return, not after the fact.</li>
+    <li>Heavy data processing <b>stays in Snowflake</b> either way; that's both the safe choice and the one
+    that makes the AI most effective.</li>
+    <li>If the model runs on our own hardware, the external-exposure question
+    <a href="#local">disappears entirely</a> — though “keep contexts small” remains, for quality.</li>
+  </ol>
+  <h3>Questions to ask any team wiring an agent to Snowflake</h3>
+  <ul>
+    <li>For each tool: <b>what exactly does it return to the model?</b> Rows, metadata, or a path? Is there a row cap?</li>
+    <li>Does the agent's Snowflake <b>role</b> have read-only access, scoped to the right schemas?</li>
+    <li>Where do credentials live? (Answer should be: environment/key files on the runner — <b>never</b> in code or in the conversation.)</li>
+    <li>Are we reviewing <b>QUERY_HISTORY</b> for agent-driven activity? (Snowflake logs every query these tools run — the audit trail is built in.)</li>
+    <li>Which patterns are approved for which data sensitivity tiers? (e.g., public data → A/D; internal → B/E/F; restricted → C or G.)</li>
+    <li>If we're using a remote inference provider: what are its data-retention and training terms for API traffic?</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<section id="repo">
+  <p class="kicker">Try it</p>
+  <h2>The repo is the lab</h2>
+  <p>Every pattern on this page is a runnable, self-contained Python file — dependencies declared inline
+  (PEP 723), executed with <code>uv run</code> — and it comes in two flavors. The heart of the repo is
+  <b><code>snowflake/</code></b>: real connectors, RSA key-pair auth, configured entirely by environment
+  variables; the repo README walks through key generation and setup in about ten minutes. The supplement
+  is <b><code>sqlite/</code></b>: identical patterns against a local file, runnable in the next two minutes.</p>
+  <h3>🧪 See it now — the SQLite playground</h3>
+  <pre><code>uv run sqlite/setup_demo_db.py   <span class="c"># builds demo.db: 100,000 seeded orders, no account needed</span>
+claude                            <span class="c"># approve the sqlite-* MCP servers when prompted</span>
+<span class="c"># then follow sqlite/README.md — nine copy-paste prompts, one per pattern,</span>
+<span class="c"># each with notes on exactly what to watch enter (or not enter) the context.</span></code></pre>
+  <h3>❄️ Do it for real — Snowflake</h3>
+  <pre><code><span class="c"># the whole quickstart, abridged:</span>
+openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes256 -inform PEM -out keys/rsa_key.p8
+<span class="c"># …register the public key with ALTER USER, set SNOWFLAKE_* env vars, then:</span>
+uv run snowflake/scripts/query_to_console.py snowflake/sql/setup_demo_table.sql
+uv run snowflake/scripts/query_to_file.py snowflake/sql/select_star_caution.sql     <span class="c"># 🟢 100k rows → CSV</span>
+uv run snowflake/scripts/query_to_dataframe.py snowflake/sql/select_star_caution.sql <span class="c"># 🟢 100k rows → RAM</span>
+claude  <span class="c"># .mcp.json registers patterns A, B, C — ask for revenue by region ❄️</span></code></pre>
+</section>
+
+</main>
+
+<footer>
+  <b>flake-fetch-flow</b> ❄️ — a learning repo about coding agents, Snowflake, and the art of deciding where the rows go.<br>
+  The agent holds the call slip. The tool walks the stacks. Snowflake does the math. <i>You</i> choose what comes back.
+</footer>
+
+</body>
+</html>
