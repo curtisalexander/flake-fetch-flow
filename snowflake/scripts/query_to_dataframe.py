@@ -36,6 +36,12 @@ import snowflake.connector
 
 def connect() -> snowflake.connector.SnowflakeConnection:
     """Key-pair (JWT) connection; every setting comes from environment variables."""
+    missing = [v for v in ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PRIVATE_KEY_FILE") if not os.environ.get(v)]
+    if missing:
+        raise RuntimeError(
+            f"missing environment variables: {', '.join(missing)} — "
+            "copy .env.example, fill it in, and export it (see the repo README)"
+        )
     params = {
         "account": os.environ["SNOWFLAKE_ACCOUNT"],
         "user": os.environ["SNOWFLAKE_USER"],
@@ -45,6 +51,9 @@ def connect() -> snowflake.connector.SnowflakeConnection:
         "database": os.environ.get("SNOWFLAKE_DATABASE"),
         "schema": os.environ.get("SNOWFLAKE_SCHEMA"),
         "role": os.environ.get("SNOWFLAKE_ROLE"),
+        # Governance freebie: every query lands in QUERY_HISTORY with this
+        # tag, so auditing agent activity is a one-line WHERE clause.
+        "session_parameters": {"QUERY_TAG": "flake-fetch-flow"},
     }
     passphrase = os.environ.get("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
     if passphrase:

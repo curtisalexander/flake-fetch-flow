@@ -9,3 +9,7 @@ These are the real connectors: the [Snowflake Connector for Python](https://docs
 Setup — key generation, `ALTER USER ... SET RSA_PUBLIC_KEY`, env vars, demo table — is in the [root README](../README.md#quickstart--snowflake-the-real-thing). The concepts are in the [illustrated guide](../docs/index.html).
 
 No Snowflake account handy? Every file here has a zero-setup twin in [`../sqlite/`](../sqlite/README.md) — same data flows, local database, guided tour included. Diff the twins; the flow survives the database swap. That's the lesson.
+
+```bash
+git diff --no-index snowflake/scripts/query_to_file.py sqlite/scripts/query_to_file.py
+```

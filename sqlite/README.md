@@ -2,7 +2,11 @@
 
 **Watch every data-flow pattern happen, live, in about ten minutes — no Snowflake account required.**
 
-This directory is a *supplement*. The heart of this repo is [`snowflake/`](../snowflake/) — the real connectors, real key-pair auth, real warehouse. But the lesson of this repo is about **where the rows go**, and that lesson is identical whether the database is a cloud warehouse or a local file. So: every tool in `snowflake/` has a twin here with `sqlite3` standing in. Diff any pair of files — the connection code shrinks, the data flow doesn't change.
+This directory is a *supplement*. The heart of this repo is [`snowflake/`](../snowflake/) — the real connectors, real key-pair auth, real warehouse. But the lesson of this repo is about **where the rows go**, and that lesson is identical whether the database is a cloud warehouse or a local file. So: every tool in `snowflake/` has a twin here with `sqlite3` standing in. Diff any pair of files — the connection code shrinks, the data flow doesn't change:
+
+```bash
+git diff --no-index snowflake/scripts/query_to_file.py sqlite/scripts/query_to_file.py
+```
 
 > **The one honest difference:** with Snowflake, "the database does the heavy lifting" means a remote warehouse you pay for; here it means your laptop. Every arrow that matters — what enters the model's context, what lands on disk, what stays in memory — is the same.
 

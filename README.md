@@ -24,7 +24,11 @@ Every tool here demonstrates a different answer to the question *"where do the r
 | **F** | Script loads a DataFrame (no dump) | [`snowflake/scripts/query_to_dataframe.py`](snowflake/scripts/query_to_dataframe.py) | [twin](sqlite/scripts/query_to_dataframe.py) | 🟢 No — shape + schema only |
 | **G** | *You* run any script in your own terminal | any of the above | any of the above | 🟢 The LLM isn't even in the room |
 
-Note that A and D are the *same data flow* in different clothes, and so are B and E. MCP-vs-script is an ergonomics choice; **what the tool returns/prints is the data-flow choice.** Diff any Snowflake file against its SQLite twin: the database swaps, the flow doesn't.
+Note that A and D are the *same data flow* in different clothes, and so are B and E. MCP-vs-script is an ergonomics choice; **what the tool returns/prints is the data-flow choice.** Diff any Snowflake file against its SQLite twin — the database swaps, the flow doesn't:
+
+```bash
+git diff --no-index snowflake/scripts/query_to_file.py sqlite/scripts/query_to_file.py
+```
 
 ## Repo map
 
@@ -40,8 +44,9 @@ flake-fetch-flow/
 │   └── sql/                 ←    demo table setup + example queries
 ├── sqlite/                  ← 🧪 the playground: same patterns, zero setup
 │   ├── README.md            ←    guided tour — steps + prompts to run with an agent
-│   ├── setup_demo_db.py     ←    builds demo.db (100k rows, seeded)
+│   ├── setup_demo_db.py     ←    builds demo.db (100k rows, seeded + anchored: byte-identical for everyone)
 │   ├── mcp-servers/ scripts/ sql/
+├── smoke_test.py            ← single-file manual test of the whole SQLite surface
 └── results/                 ← where the to-file patterns write CSVs (gitignored)
 ```
 
@@ -55,6 +60,12 @@ claude                            # approve the sqlite-* MCP servers when asked
 ```
 
 Then follow the [guided tour](sqlite/README.md): nine copy-paste prompts that walk every pattern, with notes on exactly what to watch entering (or not entering) the model's context.
+
+To verify everything works on your machine (after cloning, or after making changes), run the single-file smoke test — it exercises the setup script, all three SQLite scripts, and all three SQLite MCP servers over real JSON-RPC:
+
+```bash
+uv run smoke_test.py
+```
 
 ## Quickstart — Snowflake (the real thing)
 
@@ -145,12 +156,14 @@ When you ask a coding agent to "query Snowflake," the LLM emits a *request to ca
 
 For the analogies (pointers, library call slips), the diagrams, the local-LLM case, and why dumping a million rows into a context window makes models *worse*, read [the guide](docs/index.html).
 
-## Publishing this repo
+## Forking / publishing your own copy
 
-1. `gh repo create flake-fetch-flow --public --source . --push`
+The guide is published at [curtisalexander.github.io/flake-fetch-flow](https://curtisalexander.github.io/flake-fetch-flow/). To publish your own fork:
+
+1. Fork (or `gh repo create <name> --public --source . --push`)
 2. On GitHub: **Settings → Pages → Source: Deploy from a branch → `main` / `docs/`**
-3. The guide goes live at `https://<your-username>.github.io/flake-fetch-flow/`
+3. The guide goes live at `https://<your-username>.github.io/<name>/`
 
 ## A note on safety
 
-These are *teaching* tools, kept intentionally small. Before pointing an agent at data you care about: use a read-only role and a dedicated warehouse, keep keys out of the repo (the `.gitignore` helps), and remember that Snowflake's `QUERY_HISTORY` gives you a complete audit trail of everything the tools ran. The guide's [decision matrix](docs/index.html#matrix) maps data sensitivity to patterns.
+These are *teaching* tools, kept intentionally small — note that none of them restricts SQL statement types (`run_query("DROP TABLE …")` is relayed as faithfully as a SELECT), so the **read-only role is the guardrail**, not the tool. Before pointing an agent at data you care about: use a read-only role and a dedicated warehouse, and keep keys out of the repo (the `.gitignore` helps). For auditing, every Snowflake tool here connects with `QUERY_TAG = 'flake-fetch-flow'`, so filtering agent activity out of `QUERY_HISTORY` is a one-line WHERE clause. See also the guide's [security footnotes](https://curtisalexander.github.io/flake-fetch-flow/#footnotes) (prompt injection, defense in depth) and [decision matrix](https://curtisalexander.github.io/flake-fetch-flow/#matrix), which maps data sensitivity to patterns.

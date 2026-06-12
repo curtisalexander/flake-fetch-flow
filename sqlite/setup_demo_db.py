@@ -27,7 +27,9 @@ PRODUCTS = ["Anvil", "Rocket Skates", "Tornado Seeds", "Earthquake Pills", "Gian
 
 def main() -> None:
     random.seed(42)
-    start = datetime.now().replace(microsecond=0)
+    # Fixed anchor (not now()) so every run, on every machine, produces
+    # byte-identical data — the docs quote these exact rows.
+    start = datetime(2026, 1, 1)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DROP TABLE IF EXISTS demo_orders")
     conn.execute(

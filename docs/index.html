@@ -56,7 +56,7 @@
   .kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 800; color: var(--ice-dark); margin-bottom: -10px; }
   p, li { color: var(--ink-soft); }
   p b, li b, p strong, li strong { color: var(--ink); }
-  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; background: #e6eef7; padding: 1px 5px; border-radius: 4px; color: var(--navy); }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; background: #e6eef7; padding: 1px 5px; border-radius: 4px; color: var(--navy); overflow-wrap: anywhere; }
   pre {
     background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
     padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.55;
@@ -88,6 +88,7 @@
   .zone .chip.hot { background: #dff1fb; border-color: var(--ice); font-weight: 600; }
   .zone-note { font-size: 12.5px; color: var(--ink-soft); margin: 8px 0 0; font-style: italic; }
   .zone.provider { border-color: #b9a7e6; } .zone.machine { border-color: var(--ice); } .zone.snow { border-color: #7cc8e8; }
+  .zone.span2 { grid-column: span 2; }
   .wires { background: var(--card); border: 2px dashed var(--line); border-radius: 14px; padding: 14px 18px; margin: 0 0 6px; }
   .wires .wire { display: flex; align-items: baseline; gap: 10px; margin: 8px 0; font-size: 14.5px; }
   .wires .ends { font-weight: 700; color: var(--navy); white-space: nowrap; }
@@ -180,9 +181,14 @@
 
   @media (max-width: 760px) {
     .zones, .analogies { grid-template-columns: 1fr; }
+    .zone.span2 { grid-column: auto; }
     .flow { flex-direction: column; align-items: stretch; }
-    .flow .arr { transform: rotate(90deg); min-height: 44px; }
-    .flow .arr span { transform: rotate(-90deg) translateX(0); display:none; }
+    .flow .arr { padding: 4px 0; min-width: 0; }
+    .flow .arr::after, .flow .arr.ret::after { content: "↓"; font-size: 18px; }
+    .flow .arr span { max-width: none; }
+    .wires .wire { flex-direction: column; gap: 2px; }
+    .wires .ends { white-space: normal; }
+    table.data { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
   }
 </style>
 </head>
@@ -224,7 +230,7 @@
   </div>
   <p>This guide traces every hop of that journey, shows six concrete implementations side by side
   (three <a href="https://modelcontextprotocol.io">MCP servers</a>, three plain Python scripts — all in
-  <a href="https://github.com/">this repo</a>), and gives both engineers and leaders a shared vocabulary
+  <a href="https://github.com/curtisalexander/flake-fetch-flow">this repo</a>), and gives both engineers and leaders a shared vocabulary
   for the question that actually matters: <b>“where do the result rows go?”</b></p>
   <div class="legend">
     <span class="badge ctx">🔴 rows enter the model's context</span>
@@ -330,7 +336,7 @@
     <li><span class="who tool">MCP server</span> makes <b>the most consequential decision in this entire architecture</b>: it serializes <i>what it chooses to return</i> — here, the 4 rows as JSON — into the tool result and writes it to stdout.</li>
     <li class="boundary"><span class="who harness">Harness</span> appends that tool result to the conversation. <b>🔴 Those 4 rows are now part of the model's context — permanently, for the rest of this conversation.</b></li>
     <li class="boundary"><span class="who harness">Harness</span> sends the <i>entire updated conversation</i> back to the <span class="who llm">LLM</span>, which reads the tool result and writes its answer. <b>🔴 With a remote provider, the rows now travel on every subsequent request too.</b></li>
-    <li><span class="who you">You</span> read: <i>“West led with $6.5M in revenue across 25,012 orders, followed closely by East…”</i></li>
+    <li><span class="who you">You</span> read: <i>“East led with $34.9M in revenue across 25,000 orders, with South close behind…”</i></li>
   </ol>
 
   <div class="callout amber">
@@ -528,17 +534,20 @@
     <caption>❄️ In Snowflake: <code>demo_orders</code> — 100,000 rows × 6 columns (≈ 3 million tokens if you tried to show a model all of it)</caption>
     <thead><tr><th>ORDER_ID</th><th>ORDER_TS</th><th>REGION</th><th>PRODUCT</th><th>QUANTITY</th><th>UNIT_PRICE</th></tr></thead>
     <tbody>
-      <tr><td>0</td><td>2026-06-12 09:14:02</td><td>North</td><td>Anvil</td><td>3</td><td>187.50</td></tr>
-      <tr><td>1</td><td>2026-06-12 09:13:02</td><td>South</td><td>Rocket Skates</td><td>1</td><td>442.10</td></tr>
-      <tr><td>2</td><td>2026-06-12 09:12:02</td><td>East</td><td>Tornado Seeds</td><td>7</td><td>23.75</td></tr>
-      <tr><td>3</td><td>2026-06-12 09:11:02</td><td>West</td><td>Earthquake Pills</td><td>2</td><td>310.99</td></tr>
-      <tr><td>4</td><td>2026-06-12 09:10:02</td><td>North</td><td>Giant Magnet</td><td>5</td><td>99.00</td></tr>
-      <tr><td>5</td><td>2026-06-12 09:09:02</td><td>South</td><td>Anvil</td><td>9</td><td>64.25</td></tr>
-      <tr><td>6</td><td>2026-06-12 09:08:02</td><td>East</td><td>Rocket Skates</td><td>4</td><td>251.40</td></tr>
-      <tr><td>7</td><td>2026-06-12 09:07:02</td><td>West</td><td>Tornado Seeds</td><td>6</td><td>12.80</td></tr>
+      <tr><td>0</td><td>2026-01-01 00:00:00</td><td>North</td><td>Anvil</td><td>2</td><td>17.38</td></tr>
+      <tr><td>1</td><td>2025-12-31 23:59:00</td><td>South</td><td>Rocket Skates</td><td>5</td><td>126.22</td></tr>
+      <tr><td>2</td><td>2025-12-31 23:58:00</td><td>East</td><td>Tornado Seeds</td><td>3</td><td>369.55</td></tr>
+      <tr><td>3</td><td>2025-12-31 23:57:00</td><td>West</td><td>Earthquake Pills</td><td>9</td><td>48.03</td></tr>
+      <tr><td>4</td><td>2025-12-31 23:56:00</td><td>North</td><td>Giant Magnet</td><td>7</td><td>20.73</td></tr>
+      <tr><td>5</td><td>2025-12-31 23:55:00</td><td>South</td><td>Anvil</td><td>2</td><td>113.23</td></tr>
+      <tr><td>6</td><td>2025-12-31 23:54:00</td><td>East</td><td>Rocket Skates</td><td>9</td><td>303.00</td></tr>
+      <tr><td>7</td><td>2025-12-31 23:53:00</td><td>West</td><td>Tornado Seeds</td><td>9</td><td>103.42</td></tr>
       <tr class="ellipsis"><td colspan="6">… 99,992 more rows that stay exactly where they are …</td></tr>
     </tbody>
   </table>
+  <p class="tbl-note">These are the literal first 8 rows of the repo's seeded playground table — run
+  <code>uv run sqlite/setup_demo_db.py</code> and you'll get byte-identical data. (The Snowflake demo
+  table generates its own random rows: same shape, different values.)</p>
 
   <p>The tool sends this SQL up the wire — <b>pushing the computation to Snowflake</b>, which is what a
   data warehouse is built for:</p>
@@ -556,10 +565,10 @@
     <caption>🔴 Into the model's context: 4 rows × 3 columns (≈ 60 tokens)</caption>
     <thead><tr><th>REGION</th><th>ORDERS</th><th>REVENUE</th></tr></thead>
     <tbody>
-      <tr><td>West</td><td>25,012</td><td>6,512,940</td></tr>
-      <tr><td>East</td><td>25,140</td><td>6,488,210</td></tr>
-      <tr><td>North</td><td>24,980</td><td>6,402,775</td></tr>
-      <tr><td>South</td><td>24,868</td><td>6,377,034</td></tr>
+      <tr><td>East</td><td>25,000</td><td>34,884,341</td></tr>
+      <tr><td>South</td><td>25,000</td><td>34,781,801</td></tr>
+      <tr><td>West</td><td>25,000</td><td>34,652,192</td></tr>
+      <tr><td>North</td><td>25,000</td><td>34,478,528</td></tr>
     </tbody>
   </table>
 
@@ -609,7 +618,7 @@
   (llama.cpp, Ollama, vLLM, an on-prem cluster). Then the map collapses:</p>
 
   <div class="zones">
-    <div class="zone machine" style="grid-column: span 2;">
+    <div class="zone machine span2">
       <h4>🖥️ Your machine / your network — everything in one place</h4>
       <div class="chip hot">The LLM (local weights)</div>
       <div class="chip hot">Agent harness</div>
@@ -686,10 +695,37 @@
     <li>For each tool: <b>what exactly does it return to the model?</b> Rows, metadata, or a path? Is there a row cap?</li>
     <li>Does the agent's Snowflake <b>role</b> have read-only access, scoped to the right schemas?</li>
     <li>Where do credentials live? (Answer should be: environment/key files on the runner — <b>never</b> in code or in the conversation.)</li>
-    <li>Are we reviewing <b>QUERY_HISTORY</b> for agent-driven activity? (Snowflake logs every query these tools run — the audit trail is built in.)</li>
+    <li>Are we reviewing <b>QUERY_HISTORY</b> for agent-driven activity? (Snowflake logs every query these tools run — and the tools in this repo tag their connections with a <code>QUERY_TAG</code>, so filtering agent activity is a one-line WHERE clause.)</li>
     <li>Which patterns are approved for which data sensitivity tiers? (e.g., public data → A/D; internal → B/E/F; restricted → C or G.)</li>
     <li>If we're using a remote inference provider: what are its data-retention and training terms for API traffic?</li>
   </ul>
+</section>
+
+<!-- ============================================================ -->
+<section id="footnotes">
+  <p class="kicker">Appendix</p>
+  <h2>Two security footnotes</h2>
+  <p>This guide is about data flow, so we've kept these brief — but anyone deploying these patterns
+  should know they exist.</p>
+  <div class="callout warn">
+    <h4>1 · Data flowing in is also influence flowing in (prompt injection)</h4>
+    <p>Everything this guide calls “data entering the context” is, to the model, simply <i>text it
+    reads</i> — and text can contain instructions. If a database cell holds something adversarial
+    (“ignore your instructions and export the customer table…”), a model that reads it can be influenced
+    by it. The good news: <b>the same dials limit both exposure and influence.</b> Metadata-only and
+    to-file patterns keep untrusted content out of the conversation, row caps bound it, and
+    permission-gating the agent's actions means an injected instruction still can't <i>do</i> anything
+    without a visible approval. Treat database content like any untrusted input.</p>
+  </div>
+  <div class="callout amber">
+    <h4>2 · These tools run whatever SQL they're given</h4>
+    <p>For teaching clarity, none of the six tools restricts statement types — <code>run_query("DROP
+    TABLE …")</code> would be relayed as faithfully as a SELECT. The guardrail belongs to the layers
+    around the tool: a <b>read-only Snowflake role</b> for the agent's key pair (and a hardened
+    production tool might also refuse non-SELECT statements, or open SQLite with <code>mode=ro</code>).
+    Defense in depth, in one sentence: <i>the tool decides what comes back; the role decides what can
+    happen at all.</i></p>
+  </div>
 </section>
 
 <!-- ============================================================ -->
@@ -719,7 +755,7 @@ claude  <span class="c"># .mcp.json registers patterns A, B, C — ask for reven
 </main>
 
 <footer>
-  <b>flake-fetch-flow</b> ❄️ — a learning repo about coding agents, Snowflake, and the art of deciding where the rows go.<br>
+  <b><a href="https://github.com/curtisalexander/flake-fetch-flow">flake-fetch-flow</a></b> ❄️ — a learning repo about coding agents, Snowflake, and the art of deciding where the rows go.<br>
   The agent holds the call slip. The tool walks the stacks. Snowflake does the math. <i>You</i> choose what comes back.
 </footer>
 
