@@ -548,6 +548,9 @@
   <p class="tbl-note">These are the literal first 8 rows of the repo's seeded playground table — run
   <code>uv run sqlite/setup_demo_db.py</code> and you'll get byte-identical data. (The Snowflake demo
   table generates its own random rows: same shape, different values.)</p>
+  <p class="tbl-note">Token math: one CSV row like <code>41327,2025-12-03 14:27:00,South,Earthquake
+  Pills,7,303.00</code> tokenizes to roughly 30 tokens (the timestamp alone is ~10) — × 100,000 rows
+  ≈ 3 million. It's an order-of-magnitude estimate; the conclusion survives a 2–3× error either way.</p>
 
   <p>The tool sends this SQL up the wire — <b>pushing the computation to Snowflake</b>, which is what a
   data warehouse is built for:</p>
