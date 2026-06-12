@@ -186,6 +186,9 @@ def main() -> None:
     )
 
     # -- cleanup ------------------------------------------------------------
+    # The CSVs are test artifacts; sqlite/demo.db is NOT — it's the playground's
+    # working database (gitignored, idempotently rebuilt), so it stays in place
+    # and a passing smoke test leaves the guided tour ready to run.
     out.unlink(missing_ok=True)
     if mcp_csv != Path("/nonexistent"):
         mcp_csv.unlink(missing_ok=True)
