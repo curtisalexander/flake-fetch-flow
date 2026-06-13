@@ -164,7 +164,7 @@ Then ask the agent things like:
 - *"Use `run_query_to_file` to export all of demo_orders."* → watch 100k rows land in `results/` while the conversation only sees a path and a row count (Pattern B)
 - *"Use `run_query_stats` to check how many orders the North region has."* → the model gets a count, never a row (Pattern C)
 
-Any MCP-compatible agent works the same way — the config format barely differs.
+Any MCP-compatible agent works the same way — the config format barely differs. And the harness needn't be tied to one model provider: Claude Code is built around Anthropic's models, but *generic* harnesses like [pi](https://github.com/earendil-works/pi) and [Continue.dev's VS Code extension](https://github.com/continuedev/continue/tree/main/extensions/vscode) can point at many different providers — even a local one (see the guide's [Local LLMs](https://curtisalexander.github.io/flake-fetch-flow/#local) section).
 
 ## The one-paragraph mental model
 

@@ -256,10 +256,14 @@
     </div>
     <div class="zone machine">
       <h4>🖥️ Your machine</h4>
-      <div class="chip hot">Agent harness (Claude Code, etc.)</div>
+      <div class="chip hot">Agent harness (Claude Code)</div>
       <div class="chip hot">MCP servers &amp; scripts — <b>the only things that touch Snowflake</b></div>
       <div class="chip">Credentials (RSA key, via environment variable)</div>
       <div class="chip">Files on disk · DataFrames in memory</div>
+      <p class="zone-note">A harness needn't be tied to one model provider. Claude Code is built around
+      Anthropic's models, but <i>generic</i> harnesses — like <b><a href="https://github.com/earendil-works/pi">pi</a></b> or
+      <b><a href="https://github.com/continuedev/continue/tree/main/extensions/vscode">Continue.dev's VS Code
+      extension</a></b> — can point at many providers, even one running locally (see <a href="#local">Local LLMs</a>).</p>
     </div>
     <div class="zone snow">
       <h4>❄️ Snowflake</h4>
@@ -618,7 +622,11 @@
   <h2>Local LLMs: when the “brain” never leaves the building</h2>
   <p>Everything above assumed the inference provider is a remote API — that's what makes the context
   boundary a <i>data-leaves-the-premises</i> boundary. But the model can also run on your own hardware
-  (llama.cpp, Ollama, vLLM, an on-prem cluster). Then the map collapses:</p>
+  (llama.cpp, Ollama, vLLM, an on-prem cluster). Pointing a harness at those local weights is exactly
+  what a <i>generic</i> harness is for: where Claude Code is built around Anthropic's hosted models,
+  provider-agnostic harnesses like <b><a href="https://github.com/earendil-works/pi">pi</a></b> and
+  <b><a href="https://github.com/continuedev/continue/tree/main/extensions/vscode">Continue.dev's VS Code extension</a></b> can target any
+  provider — including one on your own machine. Then the map collapses:</p>
 
   <div class="zones">
     <div class="zone machine span2">
